@@ -16,6 +16,9 @@
     jarvis mail test NAME    check an account can log in
     jarvis mail remove NAME  disconnect an account and delete its saved password
     jarvis mail search NAME "gmail query"   search mail directly (no AI)
+    jarvis voice             talk to Jarvis (press Enter, speak, pause)
+    jarvis voice --hands-free   keep listening after each reply
+    jarvis voice --test      check microphone, speech recognition and voice
 """
 
 from __future__ import annotations
@@ -278,6 +281,67 @@ def cmd_mail(cfg, args) -> int:
         store.close()
 
 
+VOICE_SPOKEN_STYLE = (
+    "\n\nThe user is talking to you by voice and hears your replies read aloud. Answer in short, "
+    "natural spoken sentences. Avoid tables, long lists and code unless asked; if you must show "
+    "something detailed, say it's on screen."
+)
+
+
+def cmd_voice(cfg, llm, memory, index, accounts, args) -> int:
+    from .voice.listen import EndpointSettings, Microphone
+    from .voice.session import VoiceSession
+    from .voice.speak import Speaker
+    from .voice.stt import Transcriber
+
+    try:
+        mic = Microphone(EndpointSettings(silence_ms=cfg.voice_silence_ms))
+    except RuntimeError as exc:
+        print(f"{RED}{exc}{RESET}")
+        return 1
+    speaker = Speaker(cfg.tts_voice, cfg.tts_rate)
+    if not speaker.enabled:
+        print(f"{YELLOW}No text-to-speech engine found; replies will be shown but not spoken.{RESET}")
+    print(f"{DIM}Loading speech recognition ({cfg.stt_model}). The first time this downloads the model "
+          f"once (~250-500 MB); after that it works offline.{RESET}")
+    try:
+        transcriber = Transcriber(cfg.stt_model, cfg.stt_language)
+    except Exception as exc:
+        print(f"{RED}Could not load speech recognition: {exc}{RESET}")
+        return 1
+
+    if args.test:
+        speaker.say("Hello. This is Jarvis. If you can hear me, the voice works.")
+        print("Say a short sentence after the chime…")
+        session = VoiceSession(None, mic, transcriber, speaker, printer_factory=None,
+                               on_tool=on_tool, confirm=confirm)
+        speaker.wait(15)
+        heard = session.listen()
+        print(f"Heard: {heard!r}" if heard else f"{YELLOW}Nothing recognised. Check the microphone "
+              f"permission: System Settings → Privacy & Security → Microphone.{RESET}")
+        speaker.say(f"You said: {heard}" if heard else "I didn't catch anything.")
+        speaker.wait(15)
+        speaker.close()
+        return 0 if heard else 1
+
+    cfg.think = args.think or cfg.voice_think
+    cfg.system_prompt += VOICE_SPOKEN_STYLE
+    agent = Agent(cfg, llm, memory, index=index, accounts=accounts)
+    print(f"Jarvis voice · model {cfg.model} · voice {cfg.tts_voice} · conversation #{agent.conversation_id}")
+    print(f"{DIM}Press Enter and speak; Jarvis stops listening when you pause. You can also type. "
+          f"Press Enter while Jarvis is talking to interrupt. Say \"goodbye\" or type /exit to quit.{RESET}")
+    session = VoiceSession(
+        agent, mic, transcriber, speaker,
+        printer_factory=lambda: Printer(cfg.show_thinking), on_tool=on_tool, confirm=confirm,
+        hands_free=args.hands_free,
+    )
+    speaker.say("Jarvis here. How can I help?")
+    try:
+        return session.run()
+    finally:
+        speaker.close()
+
+
 def cmd_chat(cfg, llm, memory, index, accounts, resume: bool) -> int:
     conv = memory.latest_conversation() if resume else None
     agent = Agent(cfg, llm, memory, conversation_id=conv, index=index, accounts=accounts)
@@ -324,6 +388,10 @@ def main(argv: list[str] | None = None) -> int:
     p_index.add_argument("paths", nargs="*")
     p_search = sub.add_parser("search", help="search indexed documents directly")
     p_search.add_argument("query", nargs="+")
+    p_voice = sub.add_parser("voice", help="talk to Jarvis")
+    p_voice.add_argument("--hands-free", action="store_true", help="listen again after each reply")
+    p_voice.add_argument("--think", action="store_true", help="let the model reason first (slower)")
+    p_voice.add_argument("--test", action="store_true", help="test microphone and voice, then exit")
     p_mail = sub.add_parser("mail", help="manage email accounts")
     p_mail.add_argument("action", choices=["add", "list", "test", "remove", "search"])
     p_mail.add_argument("name", nargs="?")
@@ -361,6 +429,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if command == "chat":
                 return cmd_chat(cfg, llm, memory, index, accounts, getattr(args, "resume", False))
+            if command == "voice":
+                return cmd_voice(cfg, llm, memory, index, accounts, args)
             if command == "ask":
                 agent = Agent(cfg, llm, memory, index=index, accounts=accounts)
                 try:

@@ -4,7 +4,7 @@ A private AI assistant that runs on **your own computer**, using a local model
 served by [Ollama](https://ollama.com). Your conversations, notes and (later)
 emails and files are processed locally and never sent to a cloud AI.
 
-> Status: **Step 3 – reading Gmail** done (chat, reasoning, tools, memory, file search, email).
+> Status: chat, reasoning, memory, file search, Gmail (read-only) and **voice**.
 > See [ROADMAP.md](ROADMAP.md) for what comes next.
 
 ## 1. Install Ollama and a model
@@ -166,6 +166,36 @@ Searches use Gmail's own syntax (`from:`, `subject:`, `has:attachment`,
 
 Outlook / Microsoft 365 (LUXE) is coming in Step 3b.
 
+## 7. Talk to Jarvis (voice)
+
+Free and fully offline. **Whisper** (open-source speech recognition) turns your
+voice into text on your Mac, and the built-in macOS voices read the replies aloud.
+No audio leaves the computer.
+
+```
+pip install -e ".[dev,voice]"   # one time: speech recognition + microphone support
+jarvis voice --test              # checks the microphone, speech recognition and voice
+jarvis voice                     # press Enter, speak, pause; Jarvis answers out loud
+jarvis voice --hands-free        # keeps listening after each reply
+```
+
+- The first run downloads the Whisper model once (~500 MB for `small.en`).
+- macOS will ask to let Terminal use the **microphone**. Click Allow. If you missed
+  it: System Settings → Privacy & Security → Microphone → Terminal.
+- You can still type instead of speaking. Press **Enter while Jarvis is talking**
+  to interrupt it. Say **"goodbye"** or type `/exit` to quit.
+- Approvals for risky actions are always **typed**. A misheard "yes" never
+  approves anything.
+- In voice mode Jarvis skips step-by-step reasoning by default, because it adds
+  10–20 seconds of silence. Use `jarvis voice --think` for hard questions.
+
+**A better voice (free):** System Settings → Accessibility → Spoken Content →
+System voice → Manage Voices. Download e.g. *Daniel (Enhanced)* or *Jamie
+(Premium)* under English (UK). Then set `tts_voice` in `config.toml` to the exact
+name shown by `say -v '?'`.
+
+**Speaking Urdu or mixing languages:** set `stt_model = "small"` and `stt_language = ""`.
+
 ## Configuration
 
 Optional. Create `~/.jarvis/config.toml` (on Windows, `C:\Users\<you>\.jarvis\config.toml`):
@@ -179,6 +209,10 @@ context_window = 8192   # raise if you have spare RAM/VRAM
 embed_model = "nomic-embed-text"   # "" turns off search by meaning
 min_similarity = 0.45   # lower if search misses files, raise if it returns unrelated ones
 max_file_mb = 50        # bigger files are indexed by name only
+stt_model = "small.en"  # speech recognition: tiny.en, base.en, small.en, medium.en
+tts_voice = "Daniel"    # any voice from: say -v '?'
+tts_rate = 0            # words per minute, 0 = normal
+voice_silence_ms = 900  # how long a pause means "I'm done talking"
 ```
 
 Environment variables override the file: `JARVIS_MODEL`, `OLLAMA_HOST`,
@@ -221,4 +255,8 @@ Code layout:
 | `jarvis/mail/gmail.py` | Read-only Gmail over IMAP (X-GM-RAW search, threads, attachments) |
 | `jarvis/mail/accounts.py` | Account profiles + keychain-stored passwords |
 | `jarvis/mail/tools.py` | Email tools for the agent |
+| `jarvis/voice/listen.py` | Microphone + end-of-speech detection |
+| `jarvis/voice/stt.py` | Whisper speech-to-text |
+| `jarvis/voice/speak.py` | Speakable text, sentence streaming, macOS `say` |
+| `jarvis/voice/session.py` | The talk loop |
 | `jarvis/cli.py` | `jarvis` command |

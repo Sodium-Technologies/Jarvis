@@ -45,6 +45,16 @@ class Config:
     min_similarity: float = 0.45
     # Files larger than this are indexed by name only.
     max_file_mb: float = 50.0
+    # ---- voice (jarvis voice) ----
+    # Whisper model: tiny.en, base.en, small.en, medium.en (bigger = more accurate, slower).
+    # Use "small" (no .en) with stt_language = "" to speak Urdu or mix languages.
+    stt_model: str = "small.en"
+    stt_language: str = "en"
+    # macOS voice name (run: say -v '?'), e.g. "Daniel", "Daniel (Enhanced)", "Jamie (Premium)".
+    tts_voice: str = "Daniel"
+    tts_rate: int = 0            # words per minute; 0 = the voice's normal speed
+    voice_think: bool = False    # reasoning adds 10-20 s of silence before spoken replies
+    voice_silence_ms: int = 900  # pause length that means "I'm done talking"
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     home: Path = field(default_factory=_default_home)
 

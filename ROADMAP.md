@@ -34,6 +34,14 @@ Each step ships working and tested before the next starts.
 - May need Julie (as LUXE's Microsoft 365 admin) to approve the app for her organization
 - Same four tools, so the agent does not care which provider an account uses
 
+## Voice ✅ (added on request)
+- `jarvis voice`: press Enter, speak, pause; replies spoken sentence by sentence as they are written
+- Speech-to-text: Whisper via faster-whisper, local and free (`small.en` default; multilingual option)
+- Text-to-speech: macOS `say` (default voice Daniel; free Enhanced/Premium voices supported)
+- Silence detection that adapts to room noise; interrupt by pressing Enter; hands-free mode
+- Confirmations stay typed; reasoning is never read aloud; markdown/code/paths cleaned for speech
+- Later: "Hey Jarvis" wake word (openWakeWord, free), more natural neural voices (Kokoro/Piper)
+
 ## Step 4: Email replies
 - Draft replies into the mailbox's **Drafts** folder (default behaviour)
 - Sending only via a confirmed tool call, showing the exact recipients and text
