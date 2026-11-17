@@ -55,6 +55,11 @@ class Config:
     tts_rate: int = 0            # words per minute; 0 = the voice's normal speed
     voice_think: bool = False    # reasoning adds 10-20 s of silence before spoken replies
     voice_silence_ms: int = 900  # pause length that means "I'm done talking"
+    # Words speech recognition should expect: names, places, jargon.
+    stt_vocabulary: str = "Jarvis, Buildium"
+    # "Hey Jarvis" sensitivity, 0-1. Lower = wakes more easily (more false alarms,
+    # which the transcript check then filters); higher = needs a clearer "Hey Jarvis".
+    wake_threshold: float = 0.5
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     home: Path = field(default_factory=_default_home)
 

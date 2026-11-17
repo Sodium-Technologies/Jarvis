@@ -40,7 +40,9 @@ Each step ships working and tested before the next starts.
 - Text-to-speech: macOS `say` (default voice Daniel; free Enhanced/Premium voices supported)
 - Silence detection that adapts to room noise; interrupt by pressing Enter; hands-free mode
 - Confirmations stay typed; reasoning is never read aloud; markdown/code/paths cleaned for speech
-- Later: "Hey Jarvis" wake word (openWakeWord, free), more natural neural voices (Kokoro/Piper)
+- "Hey Jarvis" wake word ✅: openWakeWord's pre-trained model, a second check by Whisper
+  (Jarvis must be addressed), muted while Jarvis talks; ~3-4% of one CPU core
+- Later: more natural neural voices (Kokoro/Piper)
 
 ## Step 4: Email replies
 - Draft replies into the mailbox's **Drafts** folder (default behaviour)

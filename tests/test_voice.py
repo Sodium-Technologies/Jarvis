@@ -163,8 +163,9 @@ def test_speaker_plays_in_order_and_can_be_interrupted():
     assert log2 == [("stopped", "A very long answer.")]
 
 
-def test_disabled_speaker_is_silent():
-    sp = Speaker(command=None)
+def test_disabled_speaker_is_silent(monkeypatch):
+    monkeypatch.setattr("jarvis.voice.speak.speech_command", lambda *a, **k: None)  # no TTS engine
+    sp = Speaker()
     sp.say("hello")
     assert not sp.enabled and not sp.busy() and sp.wait(0.1)
 

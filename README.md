@@ -177,7 +177,23 @@ pip install -e ".[dev,voice]"   # one time: speech recognition + microphone supp
 jarvis voice --test              # checks the microphone, speech recognition and voice
 jarvis voice                     # press Enter, speak, pause; Jarvis answers out loud
 jarvis voice --hands-free        # keeps listening after each reply
+jarvis voice --wake              # always listening for "Hey Jarvis"
 ```
+
+**"Hey Jarvis" mode** (`--wake`): say *"Hey Jarvis"* and your request in one
+breath (*"Hey Jarvis, any emails from Doug today?"*), or say *"Hey Jarvis"*,
+wait for "Yes?", then ask.
+- A small wake-word model (openWakeWord, free) checks the audio in 80 ms
+  pieces on your Mac. Audio is thrown away unless you say "Hey Jarvis". It uses
+  only a few percent of one CPU core.
+- To prevent false alarms, Whisper also has to hear you *address* Jarvis
+  ("Hey Jarvis…", "Jarvis, …"). Talking *about* Jarvis, or "hey Charlie", is ignored.
+- Jarvis doesn't listen while it is talking, so it never wakes itself up.
+  **Ctrl+C** stops it talking; Ctrl+C again (when it's quiet) quits.
+- macOS shows the orange microphone dot the whole time this mode is running. That
+  is expected: the mic is open, but nothing is recorded until the wake word.
+- If it misses you, set `wake_threshold = 0.4` (more sensitive). If it wakes by
+  itself too often, set `0.6`.
 
 - The first run downloads the Whisper model once (~500 MB for `small.en`).
 - macOS will ask to let Terminal use the **microphone**. Click Allow. If you missed
@@ -213,6 +229,8 @@ stt_model = "small.en"  # speech recognition: tiny.en, base.en, small.en, medium
 tts_voice = "Daniel"    # any voice from: say -v '?'
 tts_rate = 0            # words per minute, 0 = normal
 voice_silence_ms = 900  # how long a pause means "I'm done talking"
+stt_vocabulary = "Jarvis, Buildium, Reigz, Black Squirrel Flats"  # names Whisper should expect
+wake_threshold = 0.5    # "Hey Jarvis" sensitivity (lower = wakes more easily)
 ```
 
 Environment variables override the file: `JARVIS_MODEL`, `OLLAMA_HOST`,
@@ -258,5 +276,6 @@ Code layout:
 | `jarvis/voice/listen.py` | Microphone + end-of-speech detection |
 | `jarvis/voice/stt.py` | Whisper speech-to-text |
 | `jarvis/voice/speak.py` | Speakable text, sentence streaming, macOS `say` |
-| `jarvis/voice/session.py` | The talk loop |
+| `jarvis/voice/wake.py` | "Hey Jarvis" wake word + transcript check |
+| `jarvis/voice/session.py` | The talk loops (press-to-talk and wake word) |
 | `jarvis/cli.py` | `jarvis` command |

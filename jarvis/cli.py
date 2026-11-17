@@ -18,6 +18,7 @@
     jarvis mail search NAME "gmail query"   search mail directly (no AI)
     jarvis voice             talk to Jarvis (press Enter, speak, pause)
     jarvis voice --hands-free   keep listening after each reply
+    jarvis voice --wake      always listening for "Hey Jarvis"
     jarvis voice --test      check microphone, speech recognition and voice
 """
 
@@ -305,7 +306,7 @@ def cmd_voice(cfg, llm, memory, index, accounts, args) -> int:
     print(f"{DIM}Loading speech recognition ({cfg.stt_model}). The first time this downloads the model "
           f"once (~250-500 MB); after that it works offline.{RESET}")
     try:
-        transcriber = Transcriber(cfg.stt_model, cfg.stt_language)
+        transcriber = Transcriber(cfg.stt_model, cfg.stt_language, vocabulary=cfg.stt_vocabulary)
     except Exception as exc:
         print(f"{RED}Could not load speech recognition: {exc}{RESET}")
         return 1
@@ -335,6 +336,25 @@ def cmd_voice(cfg, llm, memory, index, accounts, args) -> int:
         printer_factory=lambda: Printer(cfg.show_thinking), on_tool=on_tool, confirm=confirm,
         hands_free=args.hands_free,
     )
+    if args.wake:
+        from .voice.listen import EndpointSettings as ES
+        from .voice.wake import OpenWakeWordScorer, WakeDetector, WakeListener
+
+        try:
+            detector = WakeDetector(OpenWakeWordScorer("hey_jarvis"), cfg.wake_threshold)
+        except Exception as exc:
+            print(f"{RED}Could not load the wake word model: {exc}{RESET}")
+            return 1
+        listener = WakeListener(detector, ES(silence_ms=cfg.voice_silence_ms, no_speech_timeout_s=6.0))
+        print(f"{DIM}Wake word on. Audio is checked on this Mac and discarded unless you say "
+              f"\"Hey Jarvis\". Ctrl+C stops Jarvis talking; Ctrl+C when quiet quits.{RESET}")
+        speaker.say("Ready.")
+        speaker.wait(5)
+        try:
+            return session.run_wake(listener)
+        finally:
+            speaker.close()
+
     speaker.say("Jarvis here. How can I help?")
     try:
         return session.run()
@@ -390,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     p_search.add_argument("query", nargs="+")
     p_voice = sub.add_parser("voice", help="talk to Jarvis")
     p_voice.add_argument("--hands-free", action="store_true", help="listen again after each reply")
+    p_voice.add_argument("--wake", action="store_true", help='always listen for "Hey Jarvis"')
     p_voice.add_argument("--think", action="store_true", help="let the model reason first (slower)")
     p_voice.add_argument("--test", action="store_true", help="test microphone and voice, then exit")
     p_mail = sub.add_parser("mail", help="manage email accounts")

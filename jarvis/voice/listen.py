@@ -8,6 +8,7 @@ class wraps `sounddevice`, which is only imported when actually recording.
 from __future__ import annotations
 
 import queue
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import numpy as np
@@ -31,14 +32,17 @@ class EndpointSettings:
 class Endpointer:
     """Decides, frame by frame, when an utterance starts and ends."""
 
-    def __init__(self, settings: EndpointSettings | None = None):
+    def __init__(self, settings: EndpointSettings | None = None, threshold: float | None = None):
+        """threshold: a known speech threshold (skips measuring room noise first,
+        e.g. right after the wake word, when the user may already be talking)."""
         self.s = settings or EndpointSettings()
+        self.preset = threshold
         self.reset()
 
     def reset(self) -> None:
         self.frames: list[np.ndarray] = []
         self.noise: list[float] = []
-        self.threshold = self.s.min_threshold
+        self.threshold = self.preset if self.preset is not None else self.s.min_threshold
         self.started_at: int | None = None
         self.loud_run = 0
         self.quiet_run = 0
@@ -58,7 +62,7 @@ class Endpointer:
         level = self.rms(frame)
         ms = lambda count: count * FRAME * 1000 // SAMPLE_RATE
 
-        if self.started_at is None and n <= self.s.calibration_frames:
+        if self.preset is None and self.started_at is None and n <= self.s.calibration_frames:
             self.noise.append(level)
             self.threshold = max(self.s.min_threshold, float(np.median(self.noise)) * self.s.noise_factor)
             return False
@@ -101,18 +105,45 @@ class Microphone:
             ) from exc
         self.settings = settings or EndpointSettings()
 
-    def record(self) -> np.ndarray | None:
-        """Block until the user finishes speaking. None if nothing was said."""
+    @contextmanager
+    def open(self):
+        """Keep the microphone open; yields a stream with read() and drain()."""
         import sounddevice as sd
 
-        frames: queue.Queue[np.ndarray] = queue.Queue()
-        ep = Endpointer(self.settings)
-
-        def callback(indata, _frames, _time, _status):
-            frames.put(indata[:, 0].copy())
-
+        stream = FrameStream()
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                            blocksize=FRAME, callback=callback):
-            while not ep.feed(frames.get()):
+                            blocksize=FRAME, callback=stream.callback):
+            yield stream
+
+    def record(self) -> np.ndarray | None:
+        """Block until the user finishes speaking. None if nothing was said."""
+        ep = Endpointer(self.settings)
+        with self.open() as stream:
+            while not ep.feed(stream.read()):
                 pass
         return ep.result
+
+
+class FrameStream:
+    """Microphone frames handed from the audio thread to the main thread."""
+
+    def __init__(self):
+        self.q: queue.Queue[np.ndarray] = queue.Queue()
+
+    def callback(self, indata, _frames, _time, _status) -> None:
+        self.q.put(indata[:, 0].copy())
+
+    def read(self) -> np.ndarray:
+        while True:  # short timeouts keep Ctrl+C responsive
+            try:
+                return self.q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+    def drain(self) -> None:
+        """Throw away audio that piled up while Jarvis was busy thinking."""
+        try:
+            while True:
+                self.q.get_nowait()
+        except queue.Empty:
+            pass

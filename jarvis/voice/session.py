@@ -5,11 +5,14 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Callable
 
 from ..llm import LLMError
+from .listen import Endpointer
 from .speak import SentenceStreamer
+from .wake import split_wake
 
 EXIT_PHRASES = re.compile(r"^\W*(goodbye|bye|stop listening|exit|quit)(,?\s*jarvis)?\W*$", re.I)
 LISTEN_SOUND = Path("/System/Library/Sounds/Tink.aiff")
@@ -101,3 +104,60 @@ class VoiceSession:
                 self.speaker.stop()
                 self.out("")
                 return 0
+
+    # ---- "Hey Jarvis" mode ------------------------------------------------------
+
+    def run_wake(self, listener) -> int:
+        """Always listening for "Hey Jarvis". Ctrl+C stops Jarvis talking; Ctrl+C again quits."""
+        quiet_since = [time.monotonic()]
+
+        def paused() -> bool:
+            # Ignore the microphone while Jarvis talks and for a moment after, so it
+            # never hears (and wakes to) its own voice.
+            if self.speaker.busy():
+                quiet_since[0] = time.monotonic()
+                return True
+            return time.monotonic() - quiet_since[0] < 0.4
+
+        def woke() -> None:
+            self.sound()
+            self.out("🎙  Listening…")
+
+        with self.mic.open() as stream:
+            while True:
+                try:
+                    self.out('\nSay "Hey Jarvis"…')
+                    audio = listener.wait_for_request(stream.read, paused=paused, on_wake=woke)
+                    text = self.transcriber.transcribe(audio)
+                    heard, request = split_wake(text)
+                    if not heard:
+                        self.out(f"(ignored a false alarm: heard {text!r})" if text else "(ignored a false alarm)")
+                        continue
+                    if not request:  # just "Hey Jarvis": ask, then listen for the request
+                        self.speaker.say("Yes?")
+                        self.speaker.wait(5)
+                        stream.drain()
+                        self.sound()
+                        ep = Endpointer(listener.settings, threshold=listener.noise_threshold())
+                        while not ep.feed(stream.read()):
+                            pass
+                        request = self.transcriber.transcribe(ep.result) if ep.result is not None else ""
+                        if not request:
+                            self.out("(no request heard)")
+                            continue
+                    self.out(f"you> {request}")
+                    if EXIT_PHRASES.match(request):
+                        self.speaker.say("Goodbye.")
+                        self.speaker.wait(5)
+                        return 0
+                    self.out("jarvis>")
+                    self.respond(request)
+                    stream.drain()  # audio that piled up while thinking is stale
+                except KeyboardInterrupt:
+                    if self.speaker.busy():
+                        self.speaker.stop()
+                        self.out("(stopped)")
+                        stream.drain()
+                        continue
+                    self.out("")
+                    return 0

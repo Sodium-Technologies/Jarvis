@@ -40,8 +40,11 @@ def load_whisper(model: str):
 
 
 class Transcriber:
-    def __init__(self, model: str = "small.en", language: str = "en", loader=load_whisper):
+    def __init__(self, model: str = "small.en", language: str = "en", loader=load_whisper,
+                 vocabulary: str = "Jarvis"):
         self.model = loader(model)
+        # Words Whisper should expect (names, jargon), e.g. "Jarvis, Reigz, Buildium".
+        self.vocabulary = vocabulary.strip() or None
         # English-only models (*.en) need "en"; for multilingual models "" means auto-detect
         # (e.g. speaking Urdu and English).
         self.language = "en" if model.endswith(".en") else (language or None)
@@ -49,7 +52,7 @@ class Transcriber:
     def transcribe(self, audio: np.ndarray) -> str:
         segments, _info = self.model.transcribe(
             audio.astype(np.float32), language=self.language, beam_size=5,
-            vad_filter=True, condition_on_previous_text=False,
+            vad_filter=True, condition_on_previous_text=False, hotwords=self.vocabulary,
         )
         text = " ".join(s.text.strip() for s in segments).strip()
         return clean_transcript(text, seconds=len(audio) / 16_000)
