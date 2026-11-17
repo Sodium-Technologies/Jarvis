@@ -3,7 +3,10 @@ model download."""
 
 from __future__ import annotations
 
+import logging
+import os
 import re
+import warnings
 
 import numpy as np
 
@@ -11,14 +14,34 @@ import numpy as np
 _PHANTOM = {"thank you.", "thanks for watching!", "thank you for watching.", "you", "bye.", "."}
 
 
+def load_whisper(model: str):
+    """Load a Whisper model, using the downloaded copy when there is one.
+
+    Only the very first run contacts Hugging Face (to download the model);
+    after that Jarvis starts offline and makes no network request at all.
+    """
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        raise RuntimeError("Speech recognition is not installed. Run: pip install -e \".[voice]\"") from exc
+    # int8 on the CPU is fast on Apple Silicon and needs no GPU setup.
+    try:
+        return WhisperModel(model, device="cpu", compute_type="int8", local_files_only=True)
+    except Exception:
+        pass  # not downloaded yet
+    # First run: download anonymously. No Hugging Face account or token is needed;
+    # silence the "set a HF_TOKEN" notice, which only concerns download speed limits.
+    os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return WhisperModel(model, device="cpu", compute_type="int8")
+
+
 class Transcriber:
-    def __init__(self, model: str = "small.en", language: str = "en"):
-        try:
-            from faster_whisper import WhisperModel
-        except ImportError as exc:
-            raise RuntimeError("Speech recognition is not installed. Run: pip install -e \".[voice]\"") from exc
-        # int8 on the CPU is fast on Apple Silicon and needs no GPU setup.
-        self.model = WhisperModel(model, device="cpu", compute_type="int8")
+    def __init__(self, model: str = "small.en", language: str = "en", loader=load_whisper):
+        self.model = loader(model)
         # English-only models (*.en) need "en"; for multilingual models "" means auto-detect
         # (e.g. speaking Urdu and English).
         self.language = "en" if model.endswith(".en") else (language or None)

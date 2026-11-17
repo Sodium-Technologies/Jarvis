@@ -12,7 +12,7 @@ from jarvis.tools import Tool, ToolRegistry
 from jarvis.voice.listen import FRAME, SAMPLE_RATE, EndpointSettings, Endpointer
 from jarvis.voice.session import EXIT_PHRASES, VoiceSession
 from jarvis.voice.speak import SentenceStreamer, Speaker, clean_for_speech, speech_command
-from jarvis.voice.stt import clean_transcript
+from jarvis.voice.stt import Transcriber, clean_transcript, load_whisper
 
 rng = np.random.default_rng(0)
 
@@ -264,3 +264,34 @@ def test_hands_free_listens_again_after_reply(jarvis_env):
         jarvis_env, [voice(1), voice(1), voice(1)], ["one", "two", "bye"], [""], hands_free=True)
     assert session.run() == 0
     assert [r["messages"][-1]["content"] for r in jarvis_env.requests] == ["one", "two"]
+
+
+# ---- loading the Whisper model -------------------------------------------------
+
+
+def test_whisper_uses_downloaded_model_without_network(monkeypatch):
+    import faster_whisper
+
+    calls = []
+    cached = {"small.en"}
+
+    class FakeWhisperModel:
+        def __init__(self, name, device, compute_type, local_files_only=False):
+            calls.append((name, local_files_only))
+            if local_files_only and name not in cached:
+                raise FileNotFoundError("not in cache")
+            cached.add(name)
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", FakeWhisperModel)
+    load_whisper("small.en")
+    assert calls == [("small.en", True)]  # already downloaded: no network at all
+
+    calls.clear()
+    load_whisper("medium.en")
+    assert calls == [("medium.en", True), ("medium.en", False)]  # first time: one download
+    calls.clear()
+    load_whisper("medium.en")
+    assert calls == [("medium.en", True)]
+
+    assert Transcriber("small", "").language is None      # multilingual: auto-detect
+    assert Transcriber("small.en", "").language == "en"
