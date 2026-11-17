@@ -20,9 +20,26 @@ emails and files are processed locally and never sent to a cloud AI.
    16 GB of RAM, and faster with a GPU that has 8 GB or more of memory. On a
    weaker machine use `qwen3:4b`. On a stronger one try `qwen3:14b` or `gpt-oss:20b`.
 
+### Apple Silicon Macs (M1–M4)
+
+Ollama uses the Mac's GPU (Metal) automatically. By default macOS lets the GPU
+use only about two-thirds of the memory. On a 24 GB Mac that is roughly 16 GB,
+and the model plus its working memory has to fit in it:
+
+| Mac memory | Recommended model | Download | Notes |
+|---|---|---|---|
+| 16 GB | `qwen3:8b` | ~5 GB | |
+| 24 GB | `qwen3:14b` | ~9 GB | Best balance; set `context_window = 16384` |
+| 36 GB+ | `qwen3:30b-a3b` or `gpt-oss:20b` | 14–19 GB | |
+
+On 24 GB, avoid `qwen3:30b-a3b` (~19 GB). It does not fit in GPU memory, so
+it spills onto the processor and becomes slow.
+
 ## 2. Install Jarvis
 
-You need Python 3.11 or newer.
+You need Python 3.11 or newer. macOS's built-in Python is too old. Install a
+newer one with [Homebrew](https://brew.sh): `brew install python@3.12 git`.
+After that, use `python3.12` in place of `python` in the commands below.
 
 ```
 git clone https://github.com/sodium-technologies/jarvis.git
