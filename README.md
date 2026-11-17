@@ -4,7 +4,7 @@ A private AI assistant that runs on **your own computer**, using a local model
 served by [Ollama](https://ollama.com). Your conversations, notes and (later)
 emails and files are processed locally and never sent to a cloud AI.
 
-> Status: **Step 2 – document search** done (chat, reasoning, tools, memory, file search).
+> Status: **Step 3 – reading Gmail** done (chat, reasoning, tools, memory, file search, email).
 > See [ROADMAP.md](ROADMAP.md) for what comes next.
 
 ## 1. Install Ollama and a model
@@ -120,6 +120,52 @@ be found by its **name**.
 
 `jarvis index remove <folder>` deletes everything Jarvis extracted from that folder.
 
+## 6. Connect Gmail (read-only)
+
+Jarvis signs in to Gmail with an **app password**. That is a separate
+16-letter password just for Jarvis, which you can revoke at any time without
+changing your real password.
+
+1. Turn on 2-Step Verification for the Google account: https://myaccount.google.com/signinoptions/twosv
+2. Create an app password named "Jarvis": https://myaccount.google.com/apppasswords
+3. Run the guided setup. It checks the login before saving anything:
+
+```
+jarvis mail add          # asks for address, a short name, your name/role/client, app password
+jarvis mail list
+jarvis mail test bsf
+jarvis mail search bsf "from:doug has:attachment newer_than:30d"
+jarvis mail remove bsf   # disconnects and deletes the saved password
+```
+
+Each account records **who you are on it** (for example "Naveed Ahmed Khan,
+Bookkeeper for Black Squirrel Flats"). Jarvis keeps each client's mail and
+identity separate.
+
+In chat, ask things like:
+- *"Any emails from Doug this week about deposits?"*
+- *"Find the Elm Plumbing invoice and tell me the amount on the PDF."*
+- *"Summarise the thread about unit 2's security deposit."*
+
+Searches use Gmail's own syntax (`from:`, `subject:`, `has:attachment`,
+`filename:pdf`, `newer_than:7d`, `after:2025/10/01`), exactly like the Gmail search box.
+
+**How the safety works**
+- **Read-only in code.** Jarvis opens the mailbox in IMAP read-only mode and
+  fetches with `PEEK`, so nothing is marked read, moved or deleted. There are no
+  send or delete tools yet. Note that Google itself grants an app password full
+  mailbox access, so the read-only limit is enforced by Jarvis's code. Keep the
+  app password secret, and revoke it if your Mac is lost.
+- **Password storage.** The app password is stored in the **macOS Keychain**, never
+  in Jarvis's files.
+- **Email is data, not instructions.** Jarvis is told never to follow
+  instructions written inside emails or attachments.
+- **Where mail goes.** Mail is read live from Gmail and processed only by your
+  local model. Replies that quote emails are saved in your local chat history
+  (`~/.jarvis/jarvis.db`), so keep FileVault on.
+
+Outlook / Microsoft 365 (LUXE) is coming in Step 3b.
+
 ## Configuration
 
 Optional. Create `~/.jarvis/config.toml` (on Windows, `C:\Users\<you>\.jarvis\config.toml`):
@@ -157,7 +203,8 @@ never leave your computer.
 pytest
 ```
 
-The tests run against a fake Ollama server, including fake embeddings, (`tests/conftest.py`) that speaks
+The tests run against a fake Ollama server (including fake embeddings) and a
+fake Gmail IMAP server (`tests/fake_imap.py`), (`tests/conftest.py`) that speaks
 the same streaming protocol, so they need no GPU and no model download.
 
 Code layout:
@@ -171,4 +218,7 @@ Code layout:
 | `jarvis/memory.py` | SQLite: conversations and learned notes |
 | `jarvis/extract.py` | Text from PDF, Word, Excel, CSV, HTML, .eml |
 | `jarvis/index.py` | File index: scanning, chunks, keyword + meaning search |
+| `jarvis/mail/gmail.py` | Read-only Gmail over IMAP (X-GM-RAW search, threads, attachments) |
+| `jarvis/mail/accounts.py` | Account profiles + keychain-stored passwords |
+| `jarvis/mail/tools.py` | Email tools for the agent |
 | `jarvis/cli.py` | `jarvis` command |

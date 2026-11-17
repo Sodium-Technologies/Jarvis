@@ -11,11 +11,17 @@
     jarvis index list        show indexed folders and counts
     jarvis index remove PATH stop indexing a folder
     jarvis search "query"    search documents directly (no AI)
+    jarvis mail add          connect a Gmail account (read-only)
+    jarvis mail list         show connected accounts
+    jarvis mail test NAME    check an account can log in
+    jarvis mail remove NAME  disconnect an account and delete its saved password
+    jarvis mail search NAME "gmail query"   search mail directly (no AI)
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import sys
 
@@ -24,6 +30,8 @@ from .agent import Agent
 from .config import load_config
 from .index import FileIndex
 from .llm import LLMError, OllamaClient
+from .mail.accounts import AccountStore, MailAccount
+from .mail.gmail import GmailIMAP, MailError
 from .memory import Memory
 
 DIM, CYAN, YELLOW, RED, GREEN, RESET = "\033[2m", "\033[36m", "\033[33m", "\033[31m", "\033[32m", "\033[0m"
@@ -185,9 +193,94 @@ def cmd_search(cfg, llm, query: str) -> int:
         index.close()
 
 
-def cmd_chat(cfg, llm, memory, index, resume: bool) -> int:
+APP_PASSWORD_HELP = """\
+Jarvis reads Gmail with an *app password* (a separate 16-letter password just
+for Jarvis, which you can revoke at any time without changing your real one).
+  1. Turn on 2-Step Verification: https://myaccount.google.com/signinoptions/twosv
+  2. Create an app password:      https://myaccount.google.com/apppasswords
+     (name it "Jarvis"), then paste the 16 letters below.
+Jarvis opens the mailbox read-only: it cannot send, delete or mark mail as read."""
+
+
+def _ask(prompt: str, default: str = "") -> str:
+    value = input(f"{prompt}{f' [{default}]' if default else ''}: ").strip()
+    return value or default
+
+
+def cmd_mail(cfg, args) -> int:
+    store = AccountStore(cfg.db_path)
+    try:
+        if args.action == "list":
+            accounts = store.list()
+            if not accounts:
+                print("No email accounts connected. Add one with: jarvis mail add")
+            for a in accounts:
+                print(f"  {a.describe()}")
+            return 0
+
+        if args.action == "add":
+            print(APP_PASSWORD_HELP + "\n")
+            address = _ask("Gmail address").lower()
+            if "@" not in address:
+                print(f"{RED}That doesn't look like an email address.{RESET}")
+                return 1
+            default_name = "personal" if not store.list() else ""
+            account = MailAccount(
+                name=_ask("Short name for this account (e.g. personal, bsf)", default_name).lower(),
+                provider="gmail",
+                address=address,
+                owner_name=_ask("Your name as used on this account (e.g. Naveed Ahmed Khan)"),
+                role=_ask("Your role for this account (e.g. Bookkeeper), optional"),
+                organization=_ask("Client / organization (e.g. Black Squirrel Flats), optional"),
+                imap_host=args.imap_host, imap_port=args.imap_port, imap_ssl=not args.no_ssl,
+            )
+            password = getpass.getpass("App password (hidden): ").replace(" ", "")
+            print("Checking login…")
+            try:
+                GmailIMAP(address, password, account.imap_host, account.imap_port, account.imap_ssl).check_login()
+                store.add(account, password)
+            except (MailError, ValueError) as exc:
+                print(f"{RED}{exc}{RESET}")
+                return 1
+            print(f"{GREEN}Connected '{account.name}' ({address}), read-only.{RESET}")
+            return 0
+
+        if not args.name:
+            print(f"Usage: jarvis mail {args.action} NAME")
+            return 2
+
+        if args.action == "remove":
+            if store.remove(args.name):
+                print(f"Removed '{args.name}' and deleted its saved password from the keychain.")
+                return 0
+            print(f"No account named {args.name!r}.")
+            return 1
+
+        try:
+            client = store.client(args.name)
+            if args.action == "test":
+                client.check_login()
+                print(f"{GREEN}OK{RESET}   '{args.name}' logged in and opened the mailbox read-only.")
+                return 0
+            if args.action == "search":
+                query = " ".join(args.query) or "in:inbox"
+                msgs = client.search(query, limit=10)
+                if not msgs:
+                    print("No matches.")
+                for m in msgs:
+                    print(f"{CYAN}{m.summary_line()}{RESET}\n  {m.snippet()}\n")
+                return 0
+        except MailError as exc:
+            print(f"{RED}{exc}{RESET}")
+            return 1
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_chat(cfg, llm, memory, index, accounts, resume: bool) -> int:
     conv = memory.latest_conversation() if resume else None
-    agent = Agent(cfg, llm, memory, conversation_id=conv, index=index)
+    agent = Agent(cfg, llm, memory, conversation_id=conv, index=index, accounts=accounts)
     print(f"Jarvis {__version__} · model {cfg.model} · conversation #{agent.conversation_id}")
     print(f"{DIM}Type /exit to quit, /think to toggle visible reasoning.{RESET}")
     show = cfg.show_thinking
@@ -231,6 +324,13 @@ def main(argv: list[str] | None = None) -> int:
     p_index.add_argument("paths", nargs="*")
     p_search = sub.add_parser("search", help="search indexed documents directly")
     p_search.add_argument("query", nargs="+")
+    p_mail = sub.add_parser("mail", help="manage email accounts")
+    p_mail.add_argument("action", choices=["add", "list", "test", "remove", "search"])
+    p_mail.add_argument("name", nargs="?")
+    p_mail.add_argument("query", nargs="*")
+    p_mail.add_argument("--imap-host", default="imap.gmail.com", help=argparse.SUPPRESS)
+    p_mail.add_argument("--imap-port", type=int, default=993, help=argparse.SUPPRESS)
+    p_mail.add_argument("--no-ssl", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     try:
@@ -253,13 +353,16 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_index(cfg, llm, args)
         if command == "search":
             return cmd_search(cfg, llm, " ".join(args.query))
+        if command == "mail":
+            return cmd_mail(cfg, args)
         memory = Memory(cfg.db_path)
         index = open_index(cfg, llm)
+        accounts = AccountStore(cfg.db_path)
         try:
             if command == "chat":
-                return cmd_chat(cfg, llm, memory, index, getattr(args, "resume", False))
+                return cmd_chat(cfg, llm, memory, index, accounts, getattr(args, "resume", False))
             if command == "ask":
-                agent = Agent(cfg, llm, memory, index=index)
+                agent = Agent(cfg, llm, memory, index=index, accounts=accounts)
                 try:
                     run_turn(agent, " ".join(args.question), cfg.show_thinking)
                 except LLMError as exc:
@@ -280,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             memory.close()
             index.close()
+            accounts.close()
     finally:
         llm.close()
     return 0

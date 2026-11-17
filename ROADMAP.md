@@ -20,12 +20,19 @@ Each step ships working and tested before the next starts.
 - CLI: `jarvis index add|remove|update|list`, `jarvis search`
 - Later: OCR for scanned PDFs, `.msg`/`.doc`/`.xls`, automatic re-index in background
 
-## Step 3: Email (read-only first)
-- **Client profiles**, so each client's identity, mailbox and tools stay separate:
-  - LUXE MANAGEMENT LLC: Outlook / Microsoft 365 via Microsoft Graph, acting as Yasir Ali
-  - Black Squirrel Flats: Gmail API, acting as Naveed Ahmed Khan
-- Tools: search mail, read a thread, summarise the inbox, find attachments
-- OAuth tokens stored in the OS keychain, never in the repo or the database
+## Step 3: Gmail, read-only ✅
+- Account profiles with per-account identity (name, role, client), so clients stay separate
+- Gmail over IMAP with an app password (stored in the macOS Keychain). Chosen over
+  the Gmail API because unverified OAuth apps must sign in again every 7 days on @gmail.com.
+- Read-only enforced in code: EXAMINE + BODY.PEEK, no mutating IMAP commands; tested
+- Tools: `search_email` (Gmail syntax), `read_email`, `read_email_thread`, `read_email_attachment`
+- Email text is marked as untrusted third-party data in tool output and the system prompt
+- CLI: `jarvis mail add|list|test|remove|search`
+
+## Step 3b: Outlook / Microsoft 365, read-only
+- LUXE MANAGEMENT LLC mailbox via Microsoft Graph (device-code sign-in), acting as Yasir Ali
+- May need Julie (as LUXE's Microsoft 365 admin) to approve the app for her organization
+- Same four tools, so the agent does not care which provider an account uses
 
 ## Step 4: Email replies
 - Draft replies into the mailbox's **Drafts** folder (default behaviour)
