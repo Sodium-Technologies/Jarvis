@@ -10,11 +10,15 @@ Each step ships working and tested before the next starts.
 - CLI: `doctor`, `chat`, `ask`, `history`, `notes`
 - Test suite against a fake Ollama server
 
-## Step 2: Find things in files and drives (local search)
+## Step 2: Find things in files and drives (local search) ✅
 - Index chosen folders: local disk, plus OneDrive / Google Drive sync folders
-- Read PDF, Word, Excel, CSV, text and email exports (.eml/.msg)
-- Embeddings from a local model (`nomic-embed-text` via Ollama) plus keyword search
-- Tools: `search_files`, `read_file`. Answers cite the file path.
+- Read PDF, Word, Excel, CSV, text, HTML and saved emails (.eml)
+- Hybrid search: SQLite full-text (BM25) + local embeddings (`nomic-embed-text`),
+  merged by reciprocal rank fusion, with a similarity floor so nonsense finds nothing
+- Incremental re-scans; online-only cloud files are not force-downloaded
+- Tools: `search_documents`, `find_files`, `read_file` (restricted to indexed folders)
+- CLI: `jarvis index add|remove|update|list`, `jarvis search`
+- Later: OCR for scanned PDFs, `.msg`/`.doc`/`.xls`, automatic re-index in background
 
 ## Step 3: Email (read-only first)
 - **Client profiles**, so each client's identity, mailbox and tools stay separate:

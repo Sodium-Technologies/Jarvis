@@ -16,6 +16,8 @@ DEFAULT_SYSTEM_PROMPT = """\
 You are Jarvis, a private assistant running entirely on the user's own computer.
 Be accurate and concise. If you are not sure, say so instead of guessing.
 Use the tools you are given when they help; never invent tool results.
+When an answer comes from the user's documents, name the file it came from.
+If a search finds nothing relevant, say so; do not make up file contents.
 Never take an action that sends, deletes, or pays for anything without the
 user's explicit confirmation."""
 
@@ -36,12 +38,23 @@ class Config:
     context_window: int = 8192
     request_timeout: float = 300.0
     max_tool_steps: int = 8
+    # Local embedding model for searching files by meaning. Empty = keyword search only.
+    embed_model: str = "nomic-embed-text"
+    # Meaning-search matches below this cosine similarity are ignored (0-1).
+    # Lower it if relevant files are missed; raise it if unrelated files show up.
+    min_similarity: float = 0.45
+    # Files larger than this are indexed by name only.
+    max_file_mb: float = 50.0
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     home: Path = field(default_factory=_default_home)
 
     @property
     def db_path(self) -> Path:
         return self.home / "jarvis.db"
+
+    @property
+    def index_path(self) -> Path:
+        return self.home / "index.db"
 
 
 _ENV_MAP = {

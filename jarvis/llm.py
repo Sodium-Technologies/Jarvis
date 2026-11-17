@@ -65,6 +65,25 @@ class OllamaClient:
         # "qwen3" matches "qwen3:latest"
         return model in names or f"{model}:latest" in names
 
+    # ---- embeddings ------------------------------------------------------
+
+    def embed(self, model: str, texts: list[str]) -> list[list[float]]:
+        """Return one embedding vector per input text."""
+        try:
+            resp = self._http.post("/api/embed", json={"model": model, "input": texts})
+        except httpx.ConnectError as exc:
+            raise LLMError(
+                f"Cannot reach Ollama at {self.host}. Is it running? (try: ollama serve)"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise LLMError("The embedding model took too long to respond (timeout).") from exc
+        if resp.status_code != 200:
+            raise LLMError(self._error_text(resp))
+        vectors = resp.json().get("embeddings") or []
+        if len(vectors) != len(texts):
+            raise LLMError(f"Expected {len(texts)} embeddings, got {len(vectors)}")
+        return vectors
+
     # ---- chat ------------------------------------------------------------
 
     def chat(

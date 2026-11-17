@@ -4,7 +4,7 @@ A private AI assistant that runs on **your own computer**, using a local model
 served by [Ollama](https://ollama.com). Your conversations, notes and (later)
 emails and files are processed locally and never sent to a cloud AI.
 
-> Status: **Step 1 – foundation** (chat, reasoning, tools, memory).
+> Status: **Step 2 – document search** done (chat, reasoning, tools, memory, file search).
 > See [ROADMAP.md](ROADMAP.md) for what comes next.
 
 ## 1. Install Ollama and a model
@@ -14,7 +14,10 @@ emails and files are processed locally and never sent to a cloud AI.
 
    ```
    ollama pull qwen3:8b
+   ollama pull nomic-embed-text
    ```
+
+   `nomic-embed-text` (~270 MB) is a small model used only to search your files by meaning.
 
    `qwen3:8b` (~5 GB) can reason step by step and call tools. It runs well with
    16 GB of RAM, and faster with a GPU that has 8 GB or more of memory. On a
@@ -79,6 +82,44 @@ that Black Squirrel Flats uses Buildium"* and it saves a note. Saved notes go
 into every future conversation. Deleting a note always asks for your
 confirmation first.
 
+## 5. Let Jarvis find things in your files
+
+Choose the folders Jarvis may search. It reads only these folders.
+
+```
+jarvis index add ~/Documents
+jarvis index add ~/Library/CloudStorage/OneDrive-Personal
+jarvis index add "~/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive"
+jarvis index list      # folders and counts
+jarvis index update    # pick up new/changed/deleted files (fast; only changes are re-read)
+jarvis search "security deposit Maria Lopez"   # search directly, without the AI
+```
+
+On a Mac, OneDrive and Google Drive sync into `~/Library/CloudStorage/`. Run
+`ls ~/Library/CloudStorage` to see the exact folder names. The first time,
+macOS will ask whether Terminal may access Documents or files managed by
+OneDrive or Google Drive. Click **Allow**.
+
+In chat, just ask: *"Find the lease for unit 4B and tell me the rent"*, or
+*"Where is the October occupancy report?"* Jarvis searches, opens the file, and
+names the file it used.
+
+**What can be read:** PDF (with a text layer), Word `.docx`, Excel `.xlsx`,
+CSV, text, Markdown, HTML, and saved emails `.eml`. Every other file can still
+be found by its **name**.
+
+**Known limits (for now):**
+- Scanned PDFs (images with no text) are found by name only. Text recognition (OCR) is planned.
+- Old `.doc`/`.xls` formats and Outlook `.msg` files are found by name only.
+- Native Google Docs and Sheets are only shortcut files on disk (`.gdoc`, `.gsheet`).
+  They are found by name only, until the Google Drive connection in a later step.
+- **Online-only** cloud files are found by name only, so that indexing doesn't
+  download your whole drive. To include their content, right-click the folder in
+  Finder, choose *Keep Downloaded* or *Always Keep on This Device*, then run
+  `jarvis index update`.
+
+`jarvis index remove <folder>` deletes everything Jarvis extracted from that folder.
+
 ## Configuration
 
 Optional. Create `~/.jarvis/config.toml` (on Windows, `C:\Users\<you>\.jarvis\config.toml`):
@@ -89,12 +130,17 @@ think = true            # let reasoning models think before answering
 show_thinking = false   # print the reasoning
 temperature = 0.3
 context_window = 8192   # raise if you have spare RAM/VRAM
+embed_model = "nomic-embed-text"   # "" turns off search by meaning
+min_similarity = 0.45   # lower if search misses files, raise if it returns unrelated ones
+max_file_mb = 50        # bigger files are indexed by name only
 ```
 
 Environment variables override the file: `JARVIS_MODEL`, `OLLAMA_HOST`,
 `JARVIS_HOME` (data folder), `JARVIS_CONFIG` (config file path).
 
-All data lives in `~/.jarvis/jarvis.db` (SQLite). Back it up or delete it as you like.
+All data lives in `~/.jarvis/`: `jarvis.db` (conversations, notes) and
+`index.db` (text extracted from your files). Both are plain SQLite files that
+never leave your computer.
 
 ## Safety design
 
@@ -111,7 +157,7 @@ All data lives in `~/.jarvis/jarvis.db` (SQLite). Back it up or delete it as you
 pytest
 ```
 
-The tests run against a fake Ollama server (`tests/conftest.py`) that speaks
+The tests run against a fake Ollama server, including fake embeddings, (`tests/conftest.py`) that speaks
 the same streaming protocol, so they need no GPU and no model download.
 
 Code layout:
@@ -123,4 +169,6 @@ Code layout:
 | `jarvis/agent.py` | Agent loop: model → tools → model → answer |
 | `jarvis/tools.py` | Tool registry, confirmation gate, built-in tools |
 | `jarvis/memory.py` | SQLite: conversations and learned notes |
+| `jarvis/extract.py` | Text from PDF, Word, Excel, CSV, HTML, .eml |
+| `jarvis/index.py` | File index: scanning, chunks, keyword + meaning search |
 | `jarvis/cli.py` | `jarvis` command |

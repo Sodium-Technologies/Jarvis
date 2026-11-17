@@ -5,7 +5,7 @@ from __future__ import annotations
 from .config import Config
 from .llm import ChatResult, OllamaClient, StreamCallback
 from .memory import Memory
-from .tools import ConfirmCallback, ToolRegistry, builtin_tools
+from .tools import ConfirmCallback, ToolRegistry, builtin_tools, file_tools
 
 
 class Agent:
@@ -16,6 +16,7 @@ class Agent:
         memory: Memory,
         tools: ToolRegistry | None = None,
         conversation_id: int | None = None,
+        index=None,
     ):
         self.config = config
         self.llm = llm
@@ -24,6 +25,9 @@ class Agent:
             tools = ToolRegistry()
             for t in builtin_tools(memory):
                 tools.register(t)
+            if index is not None and index.folders():
+                for t in file_tools(index):
+                    tools.register(t)
         self.tools = tools
         self.conversation_id = conversation_id or memory.new_conversation()
         self.history: list[dict] = memory.get_messages(self.conversation_id)

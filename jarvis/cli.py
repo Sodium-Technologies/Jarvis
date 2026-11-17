@@ -6,6 +6,11 @@
     jarvis ask "question"    one-shot question
     jarvis history           list past conversations
     jarvis notes             show what Jarvis has learned
+    jarvis index add PATH    add a folder to the document index
+    jarvis index update      scan folders for new/changed files
+    jarvis index list        show indexed folders and counts
+    jarvis index remove PATH stop indexing a folder
+    jarvis search "query"    search documents directly (no AI)
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ import sys
 from . import __version__
 from .agent import Agent
 from .config import load_config
+from .index import FileIndex
 from .llm import LLMError, OllamaClient
 from .memory import Memory
 
@@ -79,6 +85,12 @@ def cmd_doctor(cfg, llm: OllamaClient) -> int:
         print(f"{RED}FAIL{RESET} Model '{cfg.model}' is not installed. Run: ollama pull {cfg.model}")
         if models:
             print(f"     Installed models: {', '.join(models)}")
+    if cfg.embed_model:
+        if llm.has_model(cfg.embed_model):
+            print(f"{GREEN}OK{RESET}   Embedding model '{cfg.embed_model}' is installed")
+        else:
+            print(f"{YELLOW}WARN{RESET} Embedding model '{cfg.embed_model}' is missing; document search "
+                  f"will use keywords only. Run: ollama pull {cfg.embed_model}")
     if ok:
         try:
             r = llm.chat(cfg.model, [{"role": "user", "content": "Reply with just the word: ready"}])
@@ -95,9 +107,87 @@ def run_turn(agent: Agent, text: str, show_thinking: bool) -> None:
     printer.finish()
 
 
-def cmd_chat(cfg, llm, memory, resume: bool) -> int:
+def open_index(cfg, llm) -> FileIndex:
+    return FileIndex(cfg.index_path, llm, cfg.embed_model, cfg.max_file_mb, cfg.min_similarity)
+
+
+def cmd_index(cfg, llm, args) -> int:
+    index = open_index(cfg, llm)
+    try:
+        if args.action == "add":
+            for folder in args.paths:
+                try:
+                    path = index.add_folder(folder)
+                    print(f"Added {path}")
+                except ValueError as exc:
+                    print(f"{RED}{exc}{RESET}")
+                    return 1
+            print("Scanning…")
+            return _print_update(index)
+        if args.action == "remove":
+            for folder in args.paths:
+                print(("Removed " if index.remove_folder(folder) else "Not indexed: ") + folder)
+            return 0
+        if args.action == "update":
+            if not index.folders():
+                print("No folders yet. Add one with: jarvis index add ~/Documents")
+                return 1
+            return _print_update(index)
+        # list
+        folders = index.folders()
+        if not folders:
+            print("No folders indexed yet. Add one with: jarvis index add ~/Documents")
+            return 0
+        for f in folders:
+            print(f"  {f}")
+        st = index.stats()
+        detail = ", ".join(f"{n} {k}" for k, n in sorted(st["by_status"].items()))
+        print(f"{st['files']} files ({detail}); {st['chunks']} passages, {st['embedded']} searchable by meaning")
+        return 0
+    finally:
+        index.close()
+
+
+def _print_update(index: FileIndex) -> int:
+    tty = sys.stdout.isatty()
+
+    def progress(msg: str) -> None:
+        # Overwrite one line in a terminal; plain lines when output is redirected.
+        if tty:
+            print(f"\r{DIM}  {msg}{RESET}\033[K", end="", flush=True)
+
+    stats = index.update(progress=progress)
+    if tty:
+        print("\r\033[K", end="")
+    print(f"{GREEN}Done.{RESET} {stats.scanned} files scanned: {stats.indexed} new/changed, "
+          f"{stats.unchanged} unchanged, {stats.removed} removed, {stats.embedded} passages embedded.")
+    if stats.errors:
+        print(f"{YELLOW}{len(stats.errors)} file(s) could not be read:{RESET}")
+        for path, err in stats.errors[:15]:
+            print(f"  {path}: {err}")
+        if len(stats.errors) > 15:
+            print(f"  … and {len(stats.errors) - 15} more")
+    if stats.embed_warning:
+        print(f"{YELLOW}{stats.embed_warning}{RESET}")
+    return 0
+
+
+def cmd_search(cfg, llm, query: str) -> int:
+    index = open_index(cfg, llm)
+    try:
+        hits = index.search(query, limit=10)
+        if not hits:
+            print("No matches.")
+        for h in hits:
+            print(f"{CYAN}{h.path}{RESET}  {DIM}{h.modified}{RESET}\n  {h.snippet}\n")
+        return 0
+    finally:
+        index.close()
+
+
+def cmd_chat(cfg, llm, memory, index, resume: bool) -> int:
     conv = memory.latest_conversation() if resume else None
-    agent = Agent(cfg, llm, memory, conversation_id=conv)
+    agent = Agent(cfg, llm, memory, conversation_id=conv, index=index)
     print(f"Jarvis {__version__} · model {cfg.model} · conversation #{agent.conversation_id}")
     print(f"{DIM}Type /exit to quit, /think to toggle visible reasoning.{RESET}")
     show = cfg.show_thinking
@@ -136,6 +226,11 @@ def main(argv: list[str] | None = None) -> int:
     p_ask.add_argument("question", nargs="+")
     sub.add_parser("history", help="list past conversations")
     sub.add_parser("notes", help="show saved notes")
+    p_index = sub.add_parser("index", help="manage the document index")
+    p_index.add_argument("action", choices=["add", "remove", "update", "list"])
+    p_index.add_argument("paths", nargs="*")
+    p_search = sub.add_parser("search", help="search indexed documents directly")
+    p_search.add_argument("query", nargs="+")
     args = parser.parse_args(argv)
 
     try:
@@ -151,12 +246,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if command == "doctor":
             return cmd_doctor(cfg, llm)
+        if command == "index":
+            if args.action in ("add", "remove") and not args.paths:
+                print(f"Usage: jarvis index {args.action} FOLDER [FOLDER...]")
+                return 2
+            return cmd_index(cfg, llm, args)
+        if command == "search":
+            return cmd_search(cfg, llm, " ".join(args.query))
         memory = Memory(cfg.db_path)
+        index = open_index(cfg, llm)
         try:
             if command == "chat":
-                return cmd_chat(cfg, llm, memory, getattr(args, "resume", False))
+                return cmd_chat(cfg, llm, memory, index, getattr(args, "resume", False))
             if command == "ask":
-                agent = Agent(cfg, llm, memory)
+                agent = Agent(cfg, llm, memory, index=index)
                 try:
                     run_turn(agent, " ".join(args.question), cfg.show_thinking)
                 except LLMError as exc:
@@ -176,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
         finally:
             memory.close()
+            index.close()
     finally:
         llm.close()
     return 0

@@ -6,7 +6,9 @@ tests can assert on exactly what Jarvis sent to the model.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -17,8 +19,9 @@ class FakeOllama:
     def __init__(self):
         self.replies: list[list[dict]] = []  # each reply is a list of stream chunks
         self.requests: list[dict] = []
-        self.models = ["qwen3:8b"]
+        self.models = ["qwen3:8b", "nomic-embed-text:latest"]
         self.reject_think = False
+        self.embed_calls = 0
 
     def queue_text(self, text: str, thinking: str = "") -> None:
         chunks = []
@@ -45,6 +48,21 @@ class FakeOllama:
         )
 
 
+# Tiny "semantic" space: synonyms share a dimension, so meaning-search can find
+# documents that share no keywords with the query.
+SYNONYMS = {"tenancy": "lease", "rental": "lease", "agreement": "lease", "contract": "lease",
+            "bill": "invoice", "plumber": "plumbing", "pipe": "plumbing", "leak": "plumbing"}
+
+
+def fake_embedding(text: str, dims: int = 1024) -> list[float]:
+    text = re.sub(r"^(search_document|search_query): ", "", text)
+    vec = [0.0] * dims
+    for word in re.findall(r"[a-z]+", text.lower()):
+        word = SYNONYMS.get(word, word)
+        vec[int(hashlib.md5(word.encode()).hexdigest(), 16) % dims] += 1.0
+    return vec
+
+
 def _handler(fake: FakeOllama):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -66,9 +84,14 @@ def _handler(fake: FakeOllama):
             self._json(404, {"error": "not found"})
 
         def do_POST(self):
-            if self.path != "/api/chat":
+            if self.path not in ("/api/chat", "/api/embed"):
                 return self._json(404, {"error": "not found"})
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if self.path == "/api/embed":
+                if body["model"] not in fake.models and f"{body['model']}:latest" not in fake.models:
+                    return self._json(404, {"error": f"model \"{body['model']}\" not found, try pulling it first"})
+                fake.embed_calls += 1
+                return self._json(200, {"embeddings": [fake_embedding(t) for t in body["input"]]})
             fake.requests.append(body)
             if body["model"] not in fake.models:
                 return self._json(404, {"error": f"model '{body['model']}' not found"})

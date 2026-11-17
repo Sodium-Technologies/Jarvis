@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
+from pathlib import Path
+
+from .extract import ExtractError, extract_text
 from .memory import Memory
 
 
@@ -109,5 +112,86 @@ def builtin_tools(memory: Memory) -> list[Tool]:
             },
             forget,
             confirm=True,
+        ),
+    ]
+
+
+def file_tools(index) -> list[Tool]:
+    """Tools for finding and reading the user's indexed documents."""
+
+    def search_documents(query: str, limit: int = 5) -> str:
+        hits = index.search(query, limit=max(1, min(int(limit), 10)))
+        if not hits:
+            return "No matching documents found in the indexed folders."
+        return "\n\n".join(
+            f"[{i}] {h.path}  (modified {h.modified})\n{h.snippet}" for i, h in enumerate(hits, 1)
+        )
+
+    def find_files(name: str) -> str:
+        rows = index.find_files(name)
+        if not rows:
+            return f"No files with a name matching {name!r}."
+        return "\n".join(
+            f"{r['path']}  ({r['size'] // 1024} KB, modified "
+            f"{datetime.fromtimestamp(r['mtime']):%Y-%m-%d}{', ' + r['status'] if r['status'] != 'ok' else ''})"
+            for r in rows
+        )
+
+    def read_file(path: str, offset: int = 0, max_chars: int = 6000) -> str:
+        if not index.is_allowed(path):
+            return "Error: that file is outside the folders Jarvis is allowed to read."
+        p = Path(path).expanduser()
+        if not p.is_file():
+            return f"Error: file not found: {path}"
+        try:
+            text = extract_text(p)
+        except ExtractError as exc:
+            return f"Error: cannot read {p.name}: {exc}"
+        offset, max_chars = max(0, int(offset)), max(500, min(int(max_chars), 20000))
+        part = text[offset : offset + max_chars]
+        end = offset + len(part)
+        more = f"\n\n[showing characters {offset}-{end} of {len(text)}; call again with offset={end} for more]" if end < len(text) else ""
+        return f"{p}\n\n{part}{more}"
+
+    return [
+        Tool(
+            "search_documents",
+            "Search the user's indexed documents (PDF, Word, Excel, CSV, text, saved emails) by "
+            "topic or keywords. Returns file paths with matching passages. Use this before "
+            "answering questions about the user's files, leases, invoices, statements, etc.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to look for, in plain words."},
+                    "limit": {"type": "integer", "description": "Max files to return (default 5)."},
+                },
+                "required": ["query"],
+            },
+            search_documents,
+        ),
+        Tool(
+            "find_files",
+            "Find files by name. Accepts part of a name ('lease 4B') or a wildcard ('*.xlsx', "
+            "'*invoice*2025*'). Use when the user asks where a file is.",
+            {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+            find_files,
+        ),
+        Tool(
+            "read_file",
+            "Read the text of a file found by search_documents or find_files. Long files are "
+            "returned in parts; use offset to continue.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Full path exactly as returned by a search."},
+                    "offset": {"type": "integer", "description": "Character offset to start at."},
+                },
+                "required": ["path"],
+            },
+            read_file,
         ),
     ]
