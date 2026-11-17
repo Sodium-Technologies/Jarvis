@@ -29,7 +29,7 @@ Each step ships working and tested before the next starts.
 - Email text is marked as untrusted third-party data in tool output and the system prompt
 - CLI: `jarvis mail add|list|test|remove|search`
 
-## Step 3b: Outlook / Microsoft 365, read-only
+## Step 3b: Outlook / Microsoft 365, read-only ⏸ (postponed until Julie can approve the app)
 - LUXE MANAGEMENT LLC mailbox via Microsoft Graph (device-code sign-in), acting as Yasir Ali
 - May need Julie (as LUXE's Microsoft 365 admin) to approve the app for her organization
 - Same four tools, so the agent does not care which provider an account uses
